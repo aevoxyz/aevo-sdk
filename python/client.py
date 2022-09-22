@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import random
 import requests
 from web3 import Web3
@@ -27,7 +28,8 @@ class Client:
         self.private_key = private_key
         self.wallet_address = wallet_address
         self.api_key = api_key
-        self.connection = None
+        self.private_connection = None
+        self.public_connection = None
     
     @property
     def address(self):
@@ -80,7 +82,7 @@ class Client:
         }
     
     def get_markets(self, asset="ETH"):
-        req = requests.get(f"https://api.aevo.xyz/markets?asset={asset}", verify=True)
+        req = requests.get(f"https://api.aevo.xyz/markets?asset={asset}", verify=False)
         data = req.json()
         if type(data) is dict and data.get("error"):
             raise Exception("Failed to get markets")
@@ -113,17 +115,25 @@ class Client:
             "channel": "index",
             "data": {"asset": asset}
         }))
+    
+    async def subscribe_orders(self):
+        payload = {
+            "op": "subscribe",
+            "channel": "orders",
+        }
+        payload.update(self.auth_payload())
+        await self.private_connection.send(json.dumps(payload))
 
     async def create_order(self, instrument_id, is_buy, limit_price, quantity):
         salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
         payload = {
             "op": "create_order",
             "data": {
-                "instrument_id": str(instrument_id),
+                "instrument_id": instrument_id,
                 "maker": self.wallet_address,
                 "is_buy": is_buy,
                 "amount": str(int(quantity*10**6)),
-                "price": str(int(limit_price*10**6)),
+                "limit_price": str(int(limit_price*10**6)),
                 "salt": str(salt),
                 "signature": signature
             }
@@ -131,7 +141,36 @@ class Client:
         payload.update(self.auth_payload())
         print(json.dumps(payload))
         await self.private_connection.send(json.dumps(payload))
-
+    
+    async def edit_order(self, order_id, instrument_id, is_buy, limit_price, quantity):
+        salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
+        payload = {
+            "op": "edit_order",
+            "data": {
+                "existing_order_id": order_id,
+                "instrument_id": str(instrument_id),
+                "maker": self.wallet_address,
+                "is_buy": is_buy,
+                "amount": str(int(quantity*10**6)),
+                "limit_price": str(int(limit_price*10**6)),
+                "salt": str(salt),
+                "signature": signature
+            }
+        }
+        payload.update(self.auth_payload())
+        print(json.dumps(payload))
+        await self.private_connection.send(json.dumps(payload))
+    
+    async def cancel_order(self, order_id):
+        payload = {
+            "op": "cancel_order",
+            "data": {
+                "order_id": order_id
+            }
+        }
+        payload.update(self.auth_payload())
+        print(json.dumps(payload))
+        await self.private_connection.send(json.dumps(payload))
     
     def sign_order(self, instrument_id, is_buy, limit_price, quantity):
         salt = random.randint(0, 10**10) # we just need a large enough number
@@ -155,11 +194,11 @@ async def main():
 
     await client.open_connection()
     await client.ping_all()
-    instruments = client.get_markets()
+    # instruments = client.get_markets()
 
-    print(client.address)
-    print(instruments[0])
-    await client.create_order(instruments[0]['instrument_id'], True, 10, 10)
+    # print(instruments[0])
+    await client.subscribe_orders()
+    await client.create_order(11235, True, 10, 10)
 
     # await asyncio.gather(*[client.subscribe_orderbook(instrument["instrument_name"]) for instrument in instruments])
     # await asyncio.gather(*[client.subscribe_ticker(instrument["instrument_name"]) for instrument in instruments])
@@ -168,7 +207,16 @@ async def main():
 
     try:
         while True:
-            print(await client.private_connection.recv())
+            msg = await client.private_connection.recv()
+            order = json.loads(msg)
+            print(order)
+            # order_id = order['data']['orders'][0]['order_id']
+
+            # time.sleep(5)
+
+            # # await client.cancel_order()
+
+            # await client.edit_order(order_id, 11235, True, 12, 10)
     finally:
         await client.close_connection()
 
