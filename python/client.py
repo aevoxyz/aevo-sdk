@@ -1,14 +1,27 @@
 import json
+import random
 import requests
 from web3 import Web3
 import asyncio
 import websockets
+from eip712_structs import EIP712Struct, Address, Uint, Boolean, make_domain
+from eth_account import Account
 
-w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+
+w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545")) # This URL doesn't actually do anything, we just need a web3 instance
+
+class Order(EIP712Struct):
+    maker = Address()
+    isBuy = Boolean()
+    limitPrice = Uint(256)
+    amount = Uint(256)
+    salt = Uint(256)
+    instrument = Uint(256)
 
 class Client:
-    def __init__(self, private_key, api_key):
+    def __init__(self, private_key, wallet_address, api_key):
         self.private_key = private_key
+        self.wallet_address = wallet_address
         self.api_key = api_key
         self.connection = None
     
@@ -66,11 +79,27 @@ class Client:
     
     async def subscribe_index(self, asset):
         await self.public_connection.send(self.format_message('subscribe', 'index', {'asset': asset}))
+    
+    def sign_order(self, instrument_id, is_buy, limit_price, quantity):
+        salt = random.randint(0, 10**10) # we just need a large enough number
+        decimals = 10**6
 
+        order_struct = Order(
+            maker=self.wallet_address, # The wallet's main address
+            isBuy=is_buy,
+            limitPrice=int(limit_price * decimals),
+            amount=int(quantity * decimals),
+            salt=salt,
+            instrument=instrument_id)
+
+        domain = make_domain(name='Ribbon Exchange', version='1', chainId=1)
+        signable_bytes = Web3.keccak(order_struct.signable_bytes(domain=domain))
+        return Account._sign_hash(signable_bytes, self.private_key).signature.hex()
 
 
 async def main():
-    client = Client('', '')
+    client = Client('INSERT_PRIVATE_KEY_HERE', 'INSERT_WALLET_ADDRESS_HERE', 'INSERT_API_KEY_HERE')
+
     await client.open_connection()
     await client.ping()
     instruments = client.get_markets()
