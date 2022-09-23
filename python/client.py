@@ -1,6 +1,4 @@
-import os
 import json
-import time
 import random
 import requests
 from web3 import Web3
@@ -8,9 +6,7 @@ import asyncio
 import websockets
 from eip712_structs import EIP712Struct, Address, Uint, Boolean, make_domain
 from eth_account import Account
-from dotenv import load_dotenv
 
-load_dotenv()
 
 w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545")) # This URL doesn"t actually do anything, we just need a web3 instance
 
@@ -47,8 +43,20 @@ class Client:
         await self.public_connection.close()
         await self.private_connection.close()
     
-    async def recv(self):
-        return json.loads(await self.public_connection.recv())
+    async def recv_on_both_connections(self):
+        pub_wait = asyncio.wait_for(self.public_connection.recv(), timeout=0.1)
+        priv_wait = asyncio.wait_for(self.private_connection.recv(), timeout=0.1)
+        results = await asyncio.gather(pub_wait, priv_wait, return_exceptions=True)
+        results = filter(lambda r: not isinstance(r, asyncio.TimeoutError), results)
+        return results
+    
+    async def read_messages(self):
+        while True:
+            messages = await self.recv_on_both_connections()
+            for message in messages:
+                if isinstance(message, Exception):
+                    raise message
+                yield message
     
     async def ping_all(self):
         for connection in self.connections:
@@ -187,38 +195,3 @@ class Client:
         domain = make_domain(name="Ribbon Exchange", version="1", chainId=1)
         signable_bytes = Web3.keccak(order_struct.signable_bytes(domain=domain))
         return salt, Account._sign_hash(signable_bytes, self.private_key).signature.hex()
-    
-
-async def main():
-    client = Client(os.environ["SIGNING_KEY"], os.environ["ACCOUNT_ADDRESS"], os.environ["API_KEY"])
-
-    await client.open_connection()
-    await client.ping_all()
-    # instruments = client.get_markets()
-
-    # print(instruments[0])
-    await client.subscribe_orders()
-    await client.create_order(11235, True, 10, 10)
-
-    # await asyncio.gather(*[client.subscribe_orderbook(instrument["instrument_name"]) for instrument in instruments])
-    # await asyncio.gather(*[client.subscribe_ticker(instrument["instrument_name"]) for instrument in instruments])
-    # await asyncio.gather(*[client.subscribe_trades(instrument["instrument_name"]) for instrument in instruments])
-    # await client.subscribe_index(asset="ETH")
-
-    try:
-        while True:
-            msg = await client.private_connection.recv()
-            order = json.loads(msg)
-            print(order)
-            # order_id = order['data']['orders'][0]['order_id']
-
-            # time.sleep(5)
-
-            # # await client.cancel_order()
-
-            # await client.edit_order(order_id, 11235, True, 12, 10)
-    finally:
-        await client.close_connection()
-
-
-asyncio.run(main())
