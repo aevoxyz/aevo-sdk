@@ -89,7 +89,7 @@ async def main():
 
     # Create an order and cancel instantly
     async for msg in client.read_messages():
-        await client.cancel_order(msg['order_id'])
+        await client.cancel_order(msg['data']['orders'][0]['order_id'])
         break
 
 asyncio.run(main())
