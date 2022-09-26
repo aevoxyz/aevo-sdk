@@ -147,7 +147,6 @@ class AevoClient:
             }
         }
         payload.update(self.auth_payload())
-        print(json.dumps(payload))
         await self.private_connection.send(json.dumps(payload))
     
     async def edit_order(self, order_id, instrument_id, is_buy, limit_price, quantity):
@@ -166,7 +165,6 @@ class AevoClient:
             }
         }
         payload.update(self.auth_payload())
-        print(json.dumps(payload))
         await self.private_connection.send(json.dumps(payload))
     
     async def cancel_order(self, order_id):
@@ -177,7 +175,6 @@ class AevoClient:
             }
         }
         payload.update(self.auth_payload())
-        print(json.dumps(payload))
         await self.private_connection.send(json.dumps(payload))
     
     def sign_order(self, instrument_id, is_buy, limit_price, quantity):

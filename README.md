@@ -12,7 +12,14 @@ Please see the documentation for more details:
 Getting Started
 ---
 
-To get started, create an AevoClient instance with your credentials.
+To get started, install the dependencies for the Python SDK.
+
+```
+cd python
+pip install requirements.txt
+```
+
+Next, create an AevoClient instance with your credentials.
 
 ```python
 from client import AevoClient
@@ -85,11 +92,12 @@ async def main():
     await client.open_connection()
     instruments = client.get_markets()
 
-    await client.create_order(instruments[0]['instrument_id'], True, 10, 100)
+    await client.create_order(instruments[0]["instrument_id"], True, 10, 100)
 
     # Create an order and cancel instantly
     async for msg in client.read_messages():
-        await client.cancel_order(msg['data']['orders'][0]['order_id'])
+        await client.cancel_order(
+            json.loads(msg)["data"]["orders"][0]["order_id"])
         break
 
 asyncio.run(main())
