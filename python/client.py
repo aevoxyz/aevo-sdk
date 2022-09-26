@@ -19,7 +19,7 @@ class Order(EIP712Struct):
     salt = Uint(256)
     instrument = Uint(256)
 
-class Client:
+class AevoClient:
     def __init__(self, private_key, wallet_address, api_key):
         self.private_key = private_key
         self.wallet_address = wallet_address
