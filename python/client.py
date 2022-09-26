@@ -133,21 +133,25 @@ class AevoClient:
         await self.private_connection.send(json.dumps(payload))
 
     async def create_order(self, instrument_id, is_buy, limit_price, quantity):
-        salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
+        data = self.create_order_json(instrument_id, is_buy, limit_price, quantity)
         payload = {
             "op": "create_order",
-            "data": {
-                "instrument_id": instrument_id,
-                "maker": self.wallet_address,
-                "is_buy": is_buy,
-                "amount": str(int(quantity*10**6)),
-                "limit_price": str(int(limit_price*10**6)),
-                "salt": str(salt),
-                "signature": signature
-            }
+            "data": data
         }
         payload.update(self.auth_payload())
         await self.private_connection.send(json.dumps(payload))
+    
+    def create_order_json(self, instrument_id, is_buy, limit_price, quantity):
+        salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
+        return {
+            "instrument_id": instrument_id,
+            "maker": self.wallet_address,
+            "is_buy": is_buy,
+            "amount": str(int(quantity*10**6)),
+            "limit_price": str(int(limit_price*10**6)),
+            "salt": str(salt),
+            "signature": signature
+        }
     
     async def edit_order(self, order_id, instrument_id, is_buy, limit_price, quantity):
         salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
