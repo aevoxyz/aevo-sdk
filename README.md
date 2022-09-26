@@ -5,7 +5,7 @@ This repo hosts Aevo's Python SDK, which simplifies the common operations around
 
 Please see the documentation for more details:
 
-[REST API docs](https://aevo.readme.io/docs/reference/overview)
+[REST API docs](https://aevo.readme.io/reference)
 
 [Websocket API docs](https://aevo.readme.io/docs/websocket-overview)
 
