@@ -10,6 +10,14 @@ from eth_account import Account
 
 w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545")) # This URL doesn"t actually do anything, we just need a web3 instance
 
+REST_MAINNET = "https://api.aevo.xyz"
+REST_TESTNET = "https://api-testnet.aevo.xyz"
+
+WS_PUBLIC_MAINNET = "wss://ws.aevo.xyz"
+WS_PUBLIC_TESTNET = "wss://ws-testnet.aevo.xyz"
+
+WS_AUTH_MAINNET = "wss://ws-auth.aevo.xyz"
+WS_AUTH_TESTNET = "wss://ws-auth-testnet.aevo.xyz"
 
 class Order(EIP712Struct):
     maker = Address()
@@ -20,12 +28,16 @@ class Order(EIP712Struct):
     instrument = Uint(256)
 
 class AevoClient:
-    def __init__(self, private_key, wallet_address, api_key):
+    def __init__(self, private_key, wallet_address, api_key, env="testnet"):
         self.private_key = private_key
         self.wallet_address = wallet_address
         self.api_key = api_key
         self.private_connection = None
         self.public_connection = None
+
+        if (env != "testnet") and (env != "mainnet"):
+            raise ValueError("env must either be 'testnet' or 'mainnet'")
+        self.env = env
     
     @property
     def address(self):
@@ -34,10 +46,46 @@ class AevoClient:
     @property
     def connections(self):
         return (self.public_connection, self.private_connection)
+
+    @property
+    def ws_public_uri(self):
+        if self.env == "testnet":
+            return WS_PUBLIC_TESTNET
+        else:
+            return WS_PUBLIC_MAINNET
+
+    @property
+    def ws_auth_uri(self):
+        if self.env == "testnet":
+            return WS_AUTH_TESTNET
+        else:
+            return WS_AUTH_MAINNET
     
+    @property
+    def rest_uri(self):
+        if self.env == "testnet":
+            return REST_TESTNET
+        else:
+            return REST_MAINNET
+    
+    @property
+    def signing_domain(self):
+        if self.env == "testnet":
+            return {
+                "name": "Aevo Testnet",
+                "version": "1",
+                "chainId": "9461"
+            }
+        else:
+            return {
+                "name": "Aevo Mainnet",
+                "version": "2",
+                "chainId": "1"
+            }
+
     async def open_connection(self):
-        self.public_connection = await websockets.connect("wss://ws.aevo.xyz")
-        self.private_connection = await websockets.connect("ws://ws-auth.aevo.xyz")
+        self.public_connection = await websockets.connect(self.ws_public_uri)
+        self.private_connection = await websockets.connect(self.ws_auth_uri)
     
     async def close_connection(self):
         await self.public_connection.close()
@@ -90,7 +138,7 @@ class AevoClient:
         }
     
     def get_markets(self, asset="ETH"):
-        req = requests.get(f"https://api.aevo.xyz/markets?asset={asset}", verify=False)
+        req = requests.get(f"{self.rest_uri}/markets?asset={asset}", verify=False)
         data = req.json()
         if type(data) is dict and data.get("error"):
             raise Exception("Failed to get markets")
@@ -193,6 +241,6 @@ class AevoClient:
             salt=salt,
             instrument=instrument_id)
 
-        domain = make_domain(name="Ribbon Exchange", version="1", chainId=1)
+        domain = make_domain(**self.signing_domain)
         signable_bytes = Web3.keccak(order_struct.signable_bytes(domain=domain))
         return salt, Account._sign_hash(signable_bytes, self.private_key).signature.hex()
