@@ -137,6 +137,12 @@ class AevoClient:
             }
         }
     
+    def auth_headers(self):
+        return {
+            "S5-ACCOUNT": self.wallet_address,
+            "S5-KEY": self.api_key,
+        }
+    
     def get_markets(self, asset="ETH"):
         req = requests.get(f"{self.rest_uri}/markets?asset={asset}", verify=False)
         data = req.json()
@@ -181,7 +187,7 @@ class AevoClient:
         await self.private_connection.send(json.dumps(payload))
 
     async def create_order(self, instrument_id, is_buy, limit_price, quantity):
-        data = self.create_order_json(instrument_id, is_buy, limit_price, quantity)
+        data = self.create_order_ws_json(instrument_id, is_buy, limit_price, quantity)
         payload = {
             "op": "create_order",
             "data": data
@@ -190,20 +196,33 @@ class AevoClient:
         await self.private_connection.send(json.dumps(payload))
     
     async def rest_create_order(self, instrument_id, is_buy, limit_price, quantity):
-        data = self.create_order_json(instrument_id, is_buy, limit_price, quantity)
+        data = self.create_order_rest_json(instrument_id, is_buy, limit_price, quantity)
         req = requests.post(f'{self.rest_uri}/orders', json=data)
-        print(req.text)
+        return req.json()
     
-    def create_order_json(self, instrument_id, is_buy, limit_price, quantity):
+    def create_order_ws_json(self, instrument_id, is_buy, limit_price, quantity):
         salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
         return {
-            "instrument_id": instrument_id,
+            "instrument_id": str(instrument_id),
             "maker": self.wallet_address,
             "is_buy": is_buy,
             "amount": str(int(quantity*10**6)),
             "limit_price": str(int(limit_price*10**6)),
             "salt": str(salt),
             "signature": signature
+        }
+    
+    def create_order_rest_json(self, instrument_id, is_buy, limit_price, quantity):
+        salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
+        return {
+            "maker": self.wallet_address,
+            "isBuy": is_buy,
+            "instrument": str(instrument_id),
+            "limitPrice": str(int(limit_price*10**6)),
+            "amount": str(int(quantity*10**6)),
+            "salt": str(salt),
+            "signature": signature,
+            "mmp": False,
         }
     
     async def edit_order(self, order_id, instrument_id, is_buy, limit_price, quantity):

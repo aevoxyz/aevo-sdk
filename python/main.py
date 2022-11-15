@@ -19,6 +19,8 @@ async def main():
 
     await client.create_order(instruments[0]['instrument_id'], True, 10, 100)
 
+    print(await client.rest_create_order(instruments[0]['instrument_id'], True, 10, 100))
+
     # Create an order and cancel instantly
     async for msg in client.read_messages():
         print(msg)
