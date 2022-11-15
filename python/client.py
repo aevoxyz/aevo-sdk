@@ -79,7 +79,7 @@ class AevoClient:
         else:
             return {
                 "name": "Aevo Mainnet",
-                "version": "2",
+                "version": "1",
                 "chainId": "1"
             }
 
@@ -188,6 +188,11 @@ class AevoClient:
         }
         payload.update(self.auth_payload())
         await self.private_connection.send(json.dumps(payload))
+    
+    async def rest_create_order(self, instrument_id, is_buy, limit_price, quantity):
+        data = self.create_order_json(instrument_id, is_buy, limit_price, quantity)
+        req = requests.post(f'{self.rest_uri}/orders', json=data)
+        print(req.text)
     
     def create_order_json(self, instrument_id, is_buy, limit_price, quantity):
         salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
