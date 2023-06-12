@@ -5,9 +5,9 @@ This repo hosts Aevo's Python SDK, which simplifies the common operations around
 
 Please see the documentation for more details:
 
-[REST API docs](https://aevo.readme.io/reference)
+[REST API docs](https://docs.aevo.xyz/reference/urls)
 
-[Websocket API docs](https://aevo.readme.io/docs/websocket-overview)
+[Websocket API docs](https://docs.aevo.xyz/reference/endpoints)
 
 Getting Started
 ---
@@ -24,16 +24,28 @@ Next, create an AevoClient instance with your credentials.
 ```python
 from client import AevoClient
 
-client = AevoClient(os.environ["SIGNING_KEY"], os.environ["ACCOUNT_ADDRESS"], os.environ["API_KEY"])
-instruments = client.get_markets()
-print(instruments) # This should work if your client is setup right
+client = AevoClient(
+    signing_key="",
+    wallet_address="",
+    api_key="",
+    api_secret="",
+    env="testnet",
+)
+markets = aevo.get_markets("ETH")
+print(markets) # This should work if your client is setup right
 ```
 
-`SIGNING_KEY` - The private key of the signing key, used to sign orders.
+The variables that you have to pass into AevoClient are:
 
-`ACCOUNT_ADDRESS` - Etheruem address of the account.
+`signing_key` - The private key of the signing key, used to sign orders.
 
-`API_KEY` - API key for the account. Used for private operations.
+`wallet_address` - Etheruem address of the account.
+
+`api_key` - API key for the account. Used for private operations.
+
+`api_secret` - API secret for the account.
+
+`env` - Either `testnet` or `mainnet`.
 
 Subscribing to realtime Websocket channels
 ---
@@ -42,28 +54,44 @@ Subscribing to realtime Websocket channels
 
 ```python
 async def main():
-    client = AevoClient(os.environ["SIGNING_KEY"], os.environ["ACCOUNT_ADDRESS"], os.environ["API_KEY"])
-    await client.open_connection()
-    await client.subscribe_orderbook(instrument_name="ETH-30DEC22-1500-P")
+    aevo = AevoClient(
+        signing_key="",
+        wallet_address="",
+        api_key="",
+        api_secret="",
+        env="testnet",
+    )
 
-    async for msg in client.read_messages():
+    await aevo.open_connection() # need to do this first to open wss connections
+    await aevo.subscribe_ticker("ticker:ETH:PERPETUAL")
+
+    async for msg in aevo.read_messages():
         print(msg)
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 **Subscribing to index price**
 
 ```python
 async def main():
-    client = AevoClient(os.environ["SIGNING_KEY"], os.environ["ACCOUNT_ADDRESS"], os.environ["API_KEY"])
-    await client.open_connection()
-    await client.subscribe_index(asset="ETH")
+    aevo = AevoClient(
+        signing_key="",
+        wallet_address="",
+        api_key="",
+        api_secret="",
+        env="testnet",
+    )
 
-    async for msg in client.read_messages():
+    await aevo.open_connection() # need to do this first to open wss connections
+    await aevo.subscribe_index(asset="ETH")
+
+    async for msg in aevo.read_messages():
         print(msg)
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 Creating new orders
@@ -71,13 +99,19 @@ Creating new orders
 
 ```python
 async def main():
-    client = AevoClient(os.environ["SIGNING_KEY"], os.environ["ACCOUNT_ADDRESS"], os.environ["API_KEY"])
+    aevo = AevoClient(
+        signing_key="",
+        wallet_address="",
+        api_key="",
+        api_secret="",
+        env="testnet",
+    )
 
-    await client.open_connection()
-    instruments = client.get_markets()
+    await aevo.open_connection()
 
     # We pass in the instrument ID as the first parameter
-    await client.create_order(instruments[0]['instrument_id'], True, 10, 100)
+    # ONLY RUN THIS LINE IN TESTNET
+    await aevo.create_order(1, True, 10, 100)
 
 asyncio.run(main())
 ```
@@ -87,12 +121,16 @@ Cancelling an order
 
 ```python
 async def main():
-    client = AevoClient(os.environ["SIGNING_KEY"], os.environ["ACCOUNT_ADDRESS"], os.environ["API_KEY"])
+    aevo = AevoClient(
+        signing_key="",
+        wallet_address="",
+        api_key="",
+        api_secret="",
+        env="testnet",
+    )
+    await aevo.open_connection()
 
-    await client.open_connection()
-    instruments = client.get_markets()
-
-    await client.create_order(instruments[0]["instrument_id"], True, 10, 100)
+    await client.create_order(1, True, 10, 100)
 
     # Create an order and cancel instantly
     async for msg in client.read_messages():
