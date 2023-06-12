@@ -9,6 +9,14 @@ Please see the documentation for more details:
 
 [Websocket API docs](https://docs.aevo.xyz/reference/endpoints)
 
+Signing and API Keys can be generated through the Aevo UI:
+
+Signing Keys: https://app.aevo.xyz/settings or https://testnet.aevo.xyz/settings
+
+API Keys: https://app.aevo.xyz/settings/api-keys or https://testnet.aevo.xyz/settings/api-keys
+
+NOTE: For security purposes, signing keys automatically expire 1 week after generation 
+
 Getting Started
 ---
 
