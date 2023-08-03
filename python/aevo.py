@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import random
 import traceback
 
@@ -43,6 +44,7 @@ class Order(EIP712Struct):
     amount = Uint(256)
     salt = Uint(256)
     instrument = Uint(256)
+    timestamp = Uint(256)
 
 
 class AevoClient:
@@ -422,6 +424,7 @@ class AevoClient:
             amount=int(round(quantity * 10**6, is_buy)),
             salt=salt,
             instrument=instrument_id,
+            timestamp=int(time.time()),
         )
 
         domain = make_domain(**self.signing_domain)
