@@ -47,7 +47,7 @@ The variables that you have to pass into AevoClient are:
 
 `signing_key` - The private key of the signing key, used to sign orders.
 
-`wallet_address` - Etheruem address of the account.
+`wallet_address` - Ethereum address of the account.
 
 `api_key` - API key for the account. Used for private operations.
 
