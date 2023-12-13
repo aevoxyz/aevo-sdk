@@ -108,3 +108,11 @@ It can be tested by running `python order_ws_example.py`.
 See `order_rest_example.py` for an example flow of how to create and cancel an order via REST API.
 
 It can be tested by running `python order_rest_example.py`.
+
+## Generating infinite expiry signing key
+
+Normally signing keys generated via the UI expire after 1 week. However, you can generate a signing key that never expires by using the `generate_infinite_expiry_signing_key.py` script.
+
+You will need to extract your private key from your wallet and paste it into the code in the section indicated before running it.
+
+#### NOTE: Be very careful with this as anyone with your private key will have complete access to your funds. Remember to delete the key from the code straight after generating the signing key.
