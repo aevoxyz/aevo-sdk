@@ -46,13 +46,14 @@ CONFIG = {
     },
 }
 
+# NOTE: Change this to "mainnet" if you want to generate a mainnet signing key
 environment = "testnet"
-
-domain = make_domain(**CONFIG[environment]["signing_domain"])
-
 # NOTE: Paste your account private key here
 # NOTE: BE CAREFUL WITH YOUR PRIVATE KEY, DO NOT SHARE IT WITH ANYONE
 account_key = ""
+
+domain = make_domain(**CONFIG[environment]["signing_domain"])
+
 account = Account.from_key(account_key)
 print("Account:", account.address)
 
