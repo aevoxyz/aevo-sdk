@@ -8,10 +8,10 @@ from aevo import AevoClient
 async def main():
     # The following values which are used for authentication on private endpoints, can be retrieved from the Aevo UI
     aevo = AevoClient(
-        signing_key="0x006421ca90740ac487e3da2842d20240b81d015704b7d9f96a4b1f91b2e446ff",
-        wallet_address="0x8454945ECC1f5152E41f6C1dee5F1aB151aC0808",
-        api_key="RdxcugVksjVCdvcH1rCkF3qVXrtquoRv",
-        api_secret="b8c4623991bfe99938be5010ac5d32cf4f684187f14e8238ef28a3298f4bf1db",
+        signing_key="",
+        wallet_address="",
+        api_key="",
+        api_secret="",
         env="testnet",
     )
 
