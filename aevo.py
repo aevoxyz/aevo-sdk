@@ -1,18 +1,17 @@
 import asyncio
 import json
 import random
+import time
 import traceback
 
 import requests
 import websockets
-from eip712_structs import Address, Boolean, EIP712Struct, Uint, make_domain
 from eth_account import Account
+from eth_hash.auto import keccak
 from loguru import logger
 from web3 import Web3
 
-w3 = Web3(
-    Web3.HTTPProvider("http://127.0.0.1:8545")
-)  # This URL doesn"t actually do anything, we just need a web3 instance
+from eip712_structs import Address, Boolean, EIP712Struct, Uint, make_domain
 
 CONFIG = {
     "testnet": {
@@ -43,6 +42,7 @@ class Order(EIP712Struct):
     amount = Uint(256)
     salt = Uint(256)
     instrument = Uint(256)
+    timestamp = Uint(256)
 
 
 class AevoClient:
@@ -74,7 +74,7 @@ class AevoClient:
 
     @property
     def address(self):
-        return w3.eth.account.from_key(self.signing_key).address
+        return Account.from_key(self.signing_key).address
 
     @property
     def rest_url(self):
@@ -185,9 +185,10 @@ class AevoClient:
     def rest_create_order(
         self, instrument_id, is_buy, limit_price, quantity, post_only=True
     ):
-        data = self.create_order_rest_json(
+        data, order_id = self.create_order_rest_json(
             int(instrument_id), is_buy, limit_price, quantity, post_only
         )
+        logger.info(data)
         req = self.client.post(
             f"{self.rest_url}/orders", json=data, headers=self.rest_headers
         )
@@ -198,7 +199,7 @@ class AevoClient:
         if is_buy:
             limit_price = 2**256 - 1
 
-        data = self.create_order_rest_json(
+        data, order_id = self.create_order_rest_json(
             int(instrument_id),
             is_buy,
             limit_price,
@@ -320,19 +321,39 @@ class AevoClient:
 
     # Private WS Commands
     def create_order_ws_json(
-        self, instrument_id, is_buy, limit_price, quantity, post_only=True
+        self,
+        instrument_id,
+        is_buy,
+        limit_price,
+        quantity,
+        post_only=True,
+        mmp=True,
+        price_decimals=10**6,
+        amount_decimals=10**6,
     ):
-        salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
-        return {
+        timestamp = int(time.time())
+        salt, signature, order_id = self.sign_order(
+            instrument_id=instrument_id,
+            is_buy=is_buy,
+            limit_price=limit_price,
+            quantity=quantity,
+            timestamp=timestamp,
+            price_decimals=price_decimals,
+        )
+
+        payload = {
             "instrument": instrument_id,
             "maker": self.wallet_address,
             "is_buy": is_buy,
-            "amount": str(int(round(quantity * 10**6, is_buy))),
-            "limit_price": str(int(round(limit_price * 10**6, is_buy))),
+            "amount": str(int(round(quantity * amount_decimals, is_buy))),
+            "limit_price": str(int(round(limit_price * price_decimals, is_buy))),
             "salt": str(salt),
             "signature": signature,
             "post_only": post_only,
+            "mmp": mmp,
+            "timestamp": timestamp,
         }
+        return payload, order_id
 
     def create_order_rest_json(
         self,
@@ -341,27 +362,58 @@ class AevoClient:
         limit_price,
         quantity,
         post_only=True,
-        decimals=10**6,
+        reduce_only=False,
+        close_position=False,
+        price_decimals=10**6,
+        amount_decimals=10**6,
+        trigger=None,
+        stop=None,
     ):
-        salt, signature = self.sign_order(
-            instrument_id, is_buy, limit_price, quantity, decimals=decimals
+        timestamp = int(time.time())
+        salt, signature, order_id = self.sign_order(
+            instrument_id=instrument_id,
+            is_buy=is_buy,
+            limit_price=limit_price,
+            quantity=quantity,
+            timestamp=timestamp,
+            price_decimals=price_decimals,
         )
-        return {
+        payload = {
             "maker": self.wallet_address,
             "is_buy": is_buy,
             "instrument": instrument_id,
-            "limit_price": str(int(round(limit_price * decimals, is_buy))),
-            "amount": str(int(round(quantity * 10**6, is_buy))),
+            "limit_price": str(int(round(limit_price * price_decimals, is_buy))),
+            "amount": str(int(round(quantity * amount_decimals, is_buy))),
             "salt": str(salt),
             "signature": signature,
             "post_only": post_only,
+            "reduce_only": reduce_only,
+            "close_position": close_position,
+            "timestamp": timestamp,
         }
+        if trigger and stop:
+            payload["trigger"] = trigger
+            payload["stop"] = stop
+
+        return payload, order_id
 
     async def create_order(
-        self, instrument_id, is_buy, limit_price, quantity, post_only=True, id=None
+        self,
+        instrument_id,
+        is_buy,
+        limit_price,
+        quantity,
+        post_only=True,
+        id=None,
+        mmp=True,
     ):
-        data = self.create_order_ws_json(
-            int(instrument_id), is_buy, limit_price, quantity, post_only
+        data, order_id = self.create_order_ws_json(
+            instrument_id=int(instrument_id),
+            is_buy=is_buy,
+            limit_price=limit_price,
+            quantity=quantity,
+            post_only=post_only,
+            mmp=mmp,
         )
         payload = {"op": "create_order", "data": data}
         if id:
@@ -369,6 +421,8 @@ class AevoClient:
 
         logger.info(payload)
         await self.send(json.dumps(payload))
+
+        return order_id
 
     async def edit_order(
         self,
@@ -379,9 +433,17 @@ class AevoClient:
         quantity,
         id=None,
         post_only=True,
+        mmp=True,
     ):
+        timestamp = int(time.time())
         instrument_id = int(instrument_id)
-        salt, signature = self.sign_order(instrument_id, is_buy, limit_price, quantity)
+        salt, signature, new_order_id = self.sign_order(
+            instrument_id=instrument_id,
+            is_buy=is_buy,
+            limit_price=limit_price,
+            quantity=quantity,
+            timestamp=timestamp,
+        )
         payload = {
             "op": "edit_order",
             "data": {
@@ -394,16 +456,25 @@ class AevoClient:
                 "salt": str(salt),
                 "signature": signature,
                 "post_only": post_only,
+                "mmp": mmp,
+                "timestamp": timestamp,
             },
         }
 
         if id:
             payload["id"] = id
 
+        logger.info(payload)
         await self.send(json.dumps(payload))
 
+        return new_order_id
+
     async def cancel_order(self, order_id):
+        if not order_id:
+            return
+
         payload = {"op": "cancel_order", "data": {"order_id": order_id}}
+        logger.info(payload)
         await self.send(json.dumps(payload))
 
     async def cancel_all_orders(self):
@@ -411,24 +482,33 @@ class AevoClient:
         await self.send(json.dumps(payload))
 
     def sign_order(
-        self, instrument_id, is_buy, limit_price, quantity, decimals=10**6
+        self,
+        instrument_id,
+        is_buy,
+        limit_price,
+        quantity,
+        timestamp,
+        price_decimals=10**6,
+        amount_decimals=10**6,
     ):
         salt = random.randint(0, 10**10)  # We just need a large enough number
 
         order_struct = Order(
             maker=self.wallet_address,  # The wallet"s main address
             isBuy=is_buy,
-            limitPrice=int(round(limit_price * decimals, is_buy)),
-            amount=int(round(quantity * 10**6, is_buy)),
+            limitPrice=int(round(limit_price * price_decimals, is_buy)),
+            amount=int(round(quantity * amount_decimals, is_buy)),
             salt=salt,
             instrument=instrument_id,
+            timestamp=timestamp,
         )
-
+        logger.info(self.signing_domain)
         domain = make_domain(**self.signing_domain)
-        signable_bytes = Web3.keccak(order_struct.signable_bytes(domain=domain))
+        signable_bytes = keccak(order_struct.signable_bytes(domain=domain))
         return (
             salt,
             Account._sign_hash(signable_bytes, self.signing_key).signature.hex(),
+            f"0x{signable_bytes.hex()}",
         )
 
 

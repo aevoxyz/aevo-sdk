@@ -1,5 +1,4 @@
-Aevo SDK
-===
+# Aevo SDK
 
 This repo hosts Aevo's Python SDK, which simplifies the common operations around signing and creating orders.
 
@@ -15,16 +14,21 @@ Signing Keys: https://app.aevo.xyz/settings or https://testnet.aevo.xyz/settings
 
 API Keys: https://app.aevo.xyz/settings/api-keys or https://testnet.aevo.xyz/settings/api-keys
 
-NOTE: For security purposes, signing keys automatically expire 1 week after generation 
+NOTE: For security purposes, signing keys automatically expire 1 week after generation
 
-Getting Started
----
+## Getting Started
 
-To get started, install the dependencies for the Python SDK.
+It is recommended that you use a virtual environment to install the dependencies. The code has specifically been tested on Python 3.11.4.
 
 ```
-cd python
-pip install requirements.txt
+virtualenv -p python3 .venv
+source .venv/bin/activate
+```
+
+Then, install the dependencies for the Python SDK.
+
+```
+pip install -r requirements.txt
 ```
 
 Next, create an AevoClient instance with your credentials.
@@ -55,8 +59,7 @@ The variables that you have to pass into AevoClient are:
 
 `env` - Either `testnet` or `mainnet`.
 
-Subscribing to realtime Websocket channels
----
+## Subscribing to realtime Websocket channels
 
 **Subscribing to orderbook updates**
 
@@ -83,69 +86,25 @@ if __name__ == "__main__":
 **Subscribing to index price**
 
 ```python
-async def main():
-    aevo = AevoClient(
-        signing_key="",
-        wallet_address="",
-        api_key="",
-        api_secret="",
-        env="testnet",
-    )
-
-    await aevo.open_connection() # need to do this first to open wss connections
-    await aevo.subscribe_index(asset="ETH")
-
-    async for msg in aevo.read_messages():
-        print(msg)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+await aevo.open_connection()
+await aevo.subscribe_index(asset="ETH")
 ```
 
-Creating new orders
----
+**(Authenticated) Subscribing to private trades**
 
 ```python
-async def main():
-    aevo = AevoClient(
-        signing_key="",
-        wallet_address="",
-        api_key="",
-        api_secret="",
-        env="testnet",
-    )
-
-    await aevo.open_connection()
-
-    # We pass in the instrument ID as the first parameter
-    # ONLY RUN THIS LINE IN TESTNET
-    await aevo.create_order(1, True, 10, 100)
-
-asyncio.run(main())
+await aevo.open_connection()
+await aevo.subscribe_fills()
 ```
 
-Cancelling an order
----
+## Websocket Order Flow
 
-```python
-async def main():
-    aevo = AevoClient(
-        signing_key="",
-        wallet_address="",
-        api_key="",
-        api_secret="",
-        env="testnet",
-    )
-    await aevo.open_connection()
+See `order_ws_example.py` for an example flow of how to create, edit and cancel an order via websocket. Due to the use of `websockets` library it is recommended that you implement your code using `asyncio` as well.
 
-    await client.create_order(1, True, 10, 100)
+It can be tested by running `python order_ws_example.py`.
 
-    # Create an order and cancel instantly
-    async for msg in client.read_messages():
-        await client.cancel_order(
-            json.loads(msg)["data"]["orders"][0]["order_id"])
-        break
+## REST API Order Flow
 
-asyncio.run(main())
-```
+See `order_rest_example.py` for an example flow of how to create and cancel an order via REST API.
 
+It can be tested by running `python order_rest_example.py`.
