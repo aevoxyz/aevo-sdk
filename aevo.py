@@ -11,7 +11,7 @@ from eth_hash.auto import keccak
 from loguru import logger
 from web3 import Web3
 
-from eip712_structs import Address, Boolean, EIP712Struct, Uint, make_domain
+from eip712_structs import Address, Boolean, EIP712Struct, Uint, Bytes, make_domain
 
 CONFIG = {
     "testnet": {
@@ -34,6 +34,21 @@ CONFIG = {
     },
 }
 
+ADDRESSES = {
+    "testnet": {
+        "l1_bridge": "0xb459023ECAf4ee7E55BEC136e592d2B7afF482E2",
+        "l1_usdc": "0xcC3e3DBb31a7410e1dc5156593CdBFA0616BB309",
+        "l2_withdraw_proxy": "0x870b65A0816B9e9A0dFCE08Fd18EFE20f245011f",
+        "l2_usdc": "0x52623B37Ff81c53567D6D16fd94638734cCDCf27",
+    },
+    "mainnet": {
+        "l1_bridge": "0x4082C9647c098a6493fb499EaE63b5ce3259c574",
+        "l1_usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "l2_withdraw_proxy": "0x4d44B9AbB13C80d2E376b7C5c982aa972239d845",
+        "l2_usdc": "0x643aaB1618c600229785A5E06E4b2d13946F7a1A",
+    },
+}
+
 
 class Order(EIP712Struct):
     maker = Address()
@@ -45,11 +60,20 @@ class Order(EIP712Struct):
     timestamp = Uint(256)
 
 
+class Withdraw(EIP712Struct):
+    collateral = Address()
+    to = Address()
+    amount = Uint(256)
+    salt = Uint(256)
+    data = Bytes(32)
+
+
 class AevoClient:
     def __init__(
         self,
         signing_key="",
         wallet_address="",
+        wallet_private_key="",  # required for withdraws
         api_key="",
         api_secret="",
         env="testnet",
@@ -57,6 +81,7 @@ class AevoClient:
     ):
         self.signing_key = signing_key
         self.wallet_address = wallet_address
+        self.wallet_private_key = wallet_private_key
         self.api_key = api_key
         self.api_secret = api_secret
         self.connection = None
@@ -253,6 +278,32 @@ class AevoClient:
             f"{self.rest_url}/orders-all", json=body, headers=self.rest_headers
         )
         return req.json()
+
+    def withdraw(
+        self,
+        amount,
+        collateral=None,
+        to=None,
+        data=None,
+        amount_decimals=10**6,
+    ):
+        if collateral == None:
+            collateral = ADDRESSES[self.env]["l2_usdc"]
+
+        if to == None:
+            to = ADDRESSES[self.env]["l2_withdraw_proxy"]
+
+        data, withdraw_id = self.create_withdraw(
+            collateral, to, amount, data, amount_decimals
+        )
+        logger.info(data)
+        req = self.client.post(
+            f"{self.rest_url}/withdraw", json=data, headers=self.rest_headers
+        )
+        try:
+            return req.json()
+        except:
+            return req.text()
 
     # Public WS Subscriptions
     async def subscribe_tickers(self, asset):
@@ -511,6 +562,46 @@ class AevoClient:
         return (
             salt,
             Account._sign_hash(signable_bytes, self.signing_key).signature.hex(),
+            f"0x{signable_bytes.hex()}",
+        )
+
+    def create_withdraw(self, collateral, to, amount, data, amount_decimals):
+        salt, signature, withdraw_id = self.sign_withdraw(
+            collateral=collateral,
+            to=to,
+            amount=amount,
+            data=data,
+            amount_decimals=amount_decimals,
+        )
+        payload = {
+            "account": self.wallet_address,
+            "collateral": collateral,
+            "to": to,
+            "amount": int(round(amount * amount_decimals)),
+            "salt": salt,
+            "signature": signature,
+        }
+        if data != None:
+            payload["data"] = data
+
+        return payload, withdraw_id
+
+    def sign_withdraw(self, collateral, to, amount, data, amount_decimals):
+        salt = random.randint(0, 10**10)  # We just need a large enough number
+
+        withdraw_struct = Withdraw(
+            to=to,
+            collateral=collateral,
+            amount=int(round(amount * amount_decimals)),
+            salt=salt,
+            data=data,
+        )
+        logger.info(self.signing_domain)
+        domain = make_domain(**self.signing_domain)
+        signable_bytes = keccak(withdraw_struct.signable_bytes(domain=domain))
+        return (
+            salt,
+            Account._sign_hash(signable_bytes, self.wallet_private_key).signature.hex(),
             f"0x{signable_bytes.hex()}",
         )
 
