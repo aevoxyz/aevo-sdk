@@ -296,6 +296,7 @@ class AevoClient:
         data, withdraw_id = self.create_withdraw(
             collateral, to, amount, data, amount_decimals
         )
+        logger.info(withdraw_id)
         logger.info(data)
         req = self.client.post(
             f"{self.rest_url}/withdraw", json=data, headers=self.rest_headers
@@ -566,6 +567,8 @@ class AevoClient:
         )
 
     def create_withdraw(self, collateral, to, amount, data, amount_decimals):
+        if data == None:
+            data = keccak(bytearray()).hex()
         salt, signature, withdraw_id = self.sign_withdraw(
             collateral=collateral,
             to=to,
