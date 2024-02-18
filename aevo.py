@@ -3,7 +3,7 @@ import json
 import random
 import time
 import traceback
-
+import vector
 import requests
 import websockets
 from eth_account import Account
