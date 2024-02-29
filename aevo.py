@@ -207,7 +207,6 @@ class AevoClient:
             is_buy,
             limit_price,
             quantity,
-            decimals=1,
             post_only=False,
         )
 
