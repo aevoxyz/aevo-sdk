@@ -4,11 +4,11 @@ This repo hosts Aevo's Python SDK, which simplifies the common operations around
 
 Please see the documentation for more details:
 
-[REST API docs](https://docs.aevo.xyz/reference/urls)
+[REST API docs](https://api-docs.aevo.xyz/reference/urls)
 
-[Websocket API docs](https://docs.aevo.xyz/reference/endpoints)
+[Websocket API docs](https://api-docs.aevo.xyz/reference/endpoints)
 
-Signing and API Keys can be generated through the Aevo UI:
+Signing and API Keys can be generated [through the Aevo UI](https://api-docs.aevo.xyz/reference/api-key-setup-via-ui):
 
 Signing Keys: https://app.aevo.xyz/settings or https://testnet.aevo.xyz/settings
 
