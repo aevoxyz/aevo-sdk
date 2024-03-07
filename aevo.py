@@ -172,7 +172,7 @@ class AevoClient:
 
     # Public REST API
     def get_index(self, asset):
-        req = self.client.get(f"{self.rest_url}/index?symbol={asset}")
+        req = self.client.get(f"{self.rest_url}/index?asset={asset}")
         data = req.json()
         return data
 
