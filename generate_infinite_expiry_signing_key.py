@@ -46,49 +46,54 @@ CONFIG = {
     },
 }
 
-# NOTE: Change this to "mainnet" if you want to generate a mainnet signing key
-environment = "testnet"
-# NOTE: Paste your account private key here
-# NOTE: BE CAREFUL WITH YOUR PRIVATE KEY, DO NOT SHARE IT WITH ANYONE
-account_key = ""
 
-domain = make_domain(**CONFIG[environment]["signing_domain"])
+def generate_signing_key(environment: str, account_key: str) -> AevoRegister:
+    domain = make_domain(**CONFIG[environment]["signing_domain"])
 
-account = Account.from_key(account_key)
-print("Account:", account.address)
+    account = Account.from_key(account_key)
+    signing_key = secrets.token_hex(32)
+    signing_key_account = Account.from_key(signing_key)
+    expiry = 2 ** 256 - 1
 
-signing_key = secrets.token_hex(32)
-signing_key_account = Account.from_key(signing_key)
+    sign_key = SignKey(account=account.address)
+    register = Register(key=signing_key_account.address, expiry=expiry)
 
-expiry = 2**256 - 1
+    sign_key_hash = keccak_256(sign_key.signable_bytes(domain=domain))
+    signing_key_signature = Account._sign_hash(sign_key_hash, signing_key).signature.hex()
 
-sign_key = SignKey(account=account.address)
-register = Register(key=signing_key_account.address, expiry=expiry)
+    register_hash = keccak_256(register.signable_bytes(domain=domain))
+    account_signature = Account._sign_hash(register_hash, account_key).signature.hex()
 
-sign_key_hash = keccak_256(sign_key.signable_bytes(domain=domain))
-signing_key_signature = Account._sign_hash(sign_key_hash, signing_key).signature.hex()
+    return {
+        "account": account.address,
+        "signing_key": signing_key_account.address,
+        "expiry": str(expiry),
+        "account_signature": account_signature,
+        "signing_key_signature": signing_key_signature,
+    }
 
-register_hash = keccak_256(register.signable_bytes(domain=domain))
-account_signature = Account._sign_hash(register_hash, account_key).signature.hex()
 
-aevo_register: AevoRegister = {
-    "account": account.address,
-    "signing_key": signing_key_account.address,
-    "expiry": str(expiry),
-    "account_signature": account_signature,
-    "signing_key_signature": signing_key_signature,
-}
+def main():
+    environment = "testnet"
+    account_key = input("Enter your account private key: ").strip()
 
-print(aevo_register)
+    aevo_register = generate_signing_key(environment, account_key)
 
-r = requests.post(f"{CONFIG[environment]['rest_url']}/register", json=aevo_register)
-print(r)
-j = r.json()
+    print(aevo_register)
 
-print(j)
+    r = requests.post(f"{CONFIG[environment]['rest_url']}/register", json=aevo_register)
+    print(r)
+    j = r.json()
 
-if "error" in j:
-    print("\n\nError:", j["error"])
-else:
-    print(f"\n\nInfinite expiry signing key generated for: {account.address}")
-    print(f"Signing Key (Use this): {signing_key}")
+    print(j)
+
+    if "error" in j:
+        print("\n\nError:", j["error"])
+    else:
+        print(f"\n\nInfinite expiry signing key generated for: {aevo_register['account']}")
+        print(f"Signing Key (Use this): {aevo_register['signing_key']}")
+
+
+if __name__ == "__main__":
+    main()
+
