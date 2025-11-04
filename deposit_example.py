@@ -69,5 +69,5 @@ if __name__ == "__main__":
     deposit_tx_hash = w3.eth.send_raw_transaction(deposit_txn.rawTransaction)
     w3.eth.wait_for_transaction_receipt(deposit_tx_hash.hex())
     logger.info(
-        f"Deposit {amount/10e6} to L1StandardBridge - TX_HASH {deposit_tx_hash}"
+        f"Deposit {amount/1e6} to L1StandardBridge - TX_HASH {deposit_tx_hash}"
     )
