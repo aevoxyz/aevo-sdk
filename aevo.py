@@ -1,8 +1,10 @@
 import asyncio
 import json
 import random
+import re
 import time
 import traceback
+from decimal import Decimal, InvalidOperation
 
 import requests
 import websockets
@@ -11,7 +13,15 @@ from eth_hash.auto import keccak
 from loguru import logger
 from web3 import Web3
 
-from eip712_structs import Address, Boolean, EIP712Struct, Uint, Bytes, make_domain
+from eip712_structs import (
+    Address,
+    Boolean,
+    EIP712Struct,
+    String,
+    Uint,
+    Bytes,
+    make_domain,
+)
 
 CONFIG = {
     "testnet": {
@@ -58,6 +68,112 @@ class Order(EIP712Struct):
     salt = Uint(256)
     instrument = Uint(256)
     timestamp = Uint(256)
+
+
+# Order signed when a builder is attached. The EIP-712 primary type is still
+# "Order"; builderFeeRate is the raw 6-decimal integer (0.0005 -> 500).
+class BuilderOrder(EIP712Struct):
+    maker = Address()
+    isBuy = Boolean()
+    limitPrice = Uint(256)
+    amount = Uint(256)
+    salt = Uint(256)
+    instrument = Uint(256)
+    timestamp = Uint(256)
+    builderId = String()
+    builderFeeRate = Uint(256)
+
+
+BuilderOrder.type_name = "Order"
+
+
+# Wallet-signed consent for a builder to charge up to maxFeeRate per order.
+# maxFeeRate is the raw 6-decimal integer (0.0005 -> 500); nonce is unix ms.
+class ApproveBuilder(EIP712Struct):
+    account = Address()
+    builderId = String()
+    maxFeeRate = Uint(256)
+    nonce = Uint(256)
+
+
+BUILDER_ID_PATTERN = re.compile(r"^builder_[0-9a-f]{16}$")
+RATE_DECIMALS = 6
+_DECIMAL_PATTERN = re.compile(r"^[0-9]+(\.[0-9]+)?$")
+
+
+def validate_builder_id(builder_id):
+    """Return builder_id if it is a well-formed builder_<16 hex> id, else raise."""
+    if not isinstance(builder_id, str) or not BUILDER_ID_PATTERN.match(builder_id):
+        raise ValueError(
+            f"builder must be a builder_id like builder_<16 hex>, got {builder_id!r}"
+        )
+    return builder_id
+
+
+def _parse_decimal(value, name):
+    # Floats are rejected on purpose: money must never pass through binary floats.
+    if isinstance(value, (bool, float)):
+        raise TypeError(
+            f"{name} must be a str, int or Decimal, not {type(value).__name__}"
+        )
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError(f"{name} must be finite, got {value}")
+        value = format(value, "f")
+    elif isinstance(value, int):
+        value = str(value)
+    if not isinstance(value, str) or not _DECIMAL_PATTERN.match(value):
+        raise ValueError(f"{name} must be a non-negative plain decimal, got {value!r}")
+    try:
+        return Decimal(value)
+    except InvalidOperation as e:
+        raise ValueError(f"{name} is not a decimal: {value!r}") from e
+
+
+def _format_decimal(value):
+    text = format(value, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def rate_to_raw(rate):
+    """Convert a decimal fee rate to the raw 6-decimal integer that is signed.
+
+    rate_to_raw("0.0005") == 500. At most 6 decimals are allowed.
+    """
+    raw = _parse_decimal(rate, "rate") * (10**RATE_DECIMALS)
+    if raw != raw.to_integral_value():
+        raise ValueError(
+            f"rate must have at most {RATE_DECIMALS} decimals, got {rate!r}"
+        )
+    return int(raw)
+
+
+def bps_to_rate(bps):
+    """Convert basis points to the decimal rate string used by the API.
+
+    bps_to_rate(5) == "0.0005". The resulting rate must fit in 6 decimals.
+    """
+    rate = _format_decimal(_parse_decimal(bps, "bps") / Decimal(10000))
+    rate_to_raw(rate)  # enforces the 6-decimal limit
+    return rate
+
+
+def _fee_rate(bps, rate, name):
+    """Return the canonical decimal rate string from exactly one of bps / rate."""
+    if bps is not None and rate is not None:
+        raise ValueError(f"pass either {name}_bps or {name}_rate, not both")
+    if bps is not None:
+        return bps_to_rate(bps)
+    if rate is not None:
+        rate_to_raw(rate)  # enforces format and the 6-decimal limit
+        return _format_decimal(_parse_decimal(rate, f"{name}_rate"))
+    raise ValueError(f"{name}_bps or {name}_rate is required")
+
+
+def _query_params(**params):
+    return {k: v for k, v in params.items() if v is not None}
 
 
 class Withdraw(EIP712Struct):
@@ -208,10 +324,25 @@ class AevoClient:
 
     # Private REST API
     def rest_create_order(
-        self, instrument_id, is_buy, limit_price, quantity, post_only=True
+        self,
+        instrument_id,
+        is_buy,
+        limit_price,
+        quantity,
+        post_only=True,
+        builder=None,
+        builder_fee_bps=None,
+        builder_fee_rate=None,
     ):
         data, order_id = self.create_order_rest_json(
-            int(instrument_id), is_buy, limit_price, quantity, post_only
+            int(instrument_id),
+            is_buy,
+            limit_price,
+            quantity,
+            post_only,
+            builder=builder,
+            builder_fee_bps=builder_fee_bps,
+            builder_fee_rate=builder_fee_rate,
         )
         logger.info(data)
         req = self.client.post(
@@ -222,7 +353,15 @@ class AevoClient:
         except:
             return req.text()
 
-    def rest_create_market_order(self, instrument_id, is_buy, quantity):
+    def rest_create_market_order(
+        self,
+        instrument_id,
+        is_buy,
+        quantity,
+        builder=None,
+        builder_fee_bps=None,
+        builder_fee_rate=None,
+    ):
         limit_price = 0
         if is_buy:
             limit_price = 2**256 - 1
@@ -234,6 +373,9 @@ class AevoClient:
             quantity,
             price_decimals=1,
             post_only=False,
+            builder=builder,
+            builder_fee_bps=builder_fee_bps,
+            builder_fee_rate=builder_fee_rate,
         )
 
         req = self.client.post(
@@ -305,6 +447,173 @@ class AevoClient:
             return req.json()
         except:
             return req.text()
+
+    # Builder Codes: public REST API
+    def get_builder(self, builder_id):
+        req = self.client.get(
+            f"{self.rest_url}/builders/{validate_builder_id(builder_id)}"
+        )
+        return req.json()
+
+    def get_builder_config(self):
+        req = self.client.get(f"{self.rest_url}/builder-config")
+        return req.json()
+
+    # Builder Codes: user (trader) REST API
+    def approve_builder(self, builder, max_fee_bps=None, max_fee_rate=None):
+        data, approval_hash = self.create_approve_builder_json(
+            builder, max_fee_bps=max_fee_bps, max_fee_rate=max_fee_rate
+        )
+        logger.info(data)
+        req = self.client.post(
+            f"{self.rest_url}/builder/approve", json=data, headers=self.rest_headers
+        )
+        return req.json()
+
+    def revoke_builder(self, builder):
+        data = {"builder_id": validate_builder_id(builder)}
+        req = self.client.post(
+            f"{self.rest_url}/builder/revoke", json=data, headers=self.rest_headers
+        )
+        return req.json()
+
+    def get_builder_approvals(self):
+        req = self.client.get(
+            f"{self.rest_url}/account/builder-approvals", headers=self.rest_headers
+        )
+        return req.json()
+
+    # Builder Codes: builder (fee account) REST API
+    def register_builder(self, name):
+        data = {"name": name}
+        req = self.client.post(
+            f"{self.rest_url}/builder/register", json=data, headers=self.rest_headers
+        )
+        return req.json()
+
+    def get_builder_stats(self, period=None, start_time=None, end_time=None):
+        return self._builder_report(
+            "stats", period=period, start_time=start_time, end_time=end_time
+        )
+
+    def get_builder_markets(
+        self, period=None, start_time=None, end_time=None, limit=None, offset=None
+    ):
+        return self._builder_report(
+            "markets",
+            period=period,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_builder_users(
+        self, period=None, start_time=None, end_time=None, limit=None, cursor=None,
+        offset=None
+    ):
+        if cursor is not None and offset is not None:
+            raise ValueError("pass either cursor or offset, not both")
+        return self._builder_report(
+            "users",
+            period=period,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            cursor=cursor,
+            offset=offset,
+        )
+
+    def get_builder_fills(
+        self, start_time=None, end_time=None, instrument=None, limit=None, cursor=None,
+        offset=None
+    ):
+        if cursor is not None and offset is not None:
+            raise ValueError("pass either cursor or offset, not both")
+        return self._builder_report(
+            "fills",
+            start_time=start_time,
+            end_time=end_time,
+            instrument=instrument,
+            limit=limit,
+            cursor=cursor,
+            offset=offset,
+        )
+
+    def download_builder_fills_csv(
+        self, path, start_time=None, end_time=None, instrument=None
+    ):
+        params = _query_params(
+            start_time=start_time, end_time=end_time, instrument=instrument
+        )
+        params["format"] = "csv"
+        req = self.client.get(
+            f"{self.rest_url}/builder/fills", params=params, headers=self.rest_headers
+        )
+        if req.status_code != 200:
+            raise RuntimeError(
+                f"GET /builder/fills?format=csv failed: HTTP {req.status_code} {req.text}"
+            )
+        with open(path, "wb") as f:
+            f.write(req.content)
+        return path
+
+    def _builder_report(self, report, **params):
+        req = self.client.get(
+            f"{self.rest_url}/builder/{report}",
+            params=_query_params(**params),
+            headers=self.rest_headers,
+        )
+        return req.json()
+
+    # Builder Codes: signing helpers
+    def create_approve_builder_json(self, builder, max_fee_bps=None, max_fee_rate=None):
+        max_fee_rate = _fee_rate(max_fee_bps, max_fee_rate, "max_fee")
+        builder_id = validate_builder_id(builder)
+        nonce = time.time_ns() // 1_000_000  # unix milliseconds
+        signature, approval_hash = self.sign_approve_builder(
+            builder_id, max_fee_rate, nonce
+        )
+        payload = {
+            "builder_id": builder_id,
+            "max_fee_rate": max_fee_rate,
+            "nonce": str(nonce),
+            "signature": signature,
+        }
+        return payload, approval_hash
+
+    def sign_approve_builder(self, builder_id, max_fee_rate, nonce):
+        # The approval is consent from the account itself, so it must be signed
+        # by the WALLET key; a signing key is rejected by the API.
+        if not self.wallet_private_key:
+            raise ValueError("wallet_private_key is required to approve a builder")
+        account = Account.from_key(self.wallet_private_key).address
+        if self.wallet_address and account.lower() != self.wallet_address.lower():
+            raise ValueError(
+                f"wallet_private_key belongs to {account}, not wallet_address {self.wallet_address}"
+            )
+
+        approval_struct = ApproveBuilder(
+            account=account,
+            builderId=builder_id,
+            maxFeeRate=rate_to_raw(max_fee_rate),
+            nonce=int(nonce),
+        )
+        domain = make_domain(**self.signing_domain)
+        signable_bytes = keccak(approval_struct.signable_bytes(domain=domain))
+        return (
+            Account._sign_hash(signable_bytes, self.wallet_private_key).signature.hex(),
+            f"0x{signable_bytes.hex()}",
+        )
+
+    def _builder_attribution(self, builder, builder_fee_bps, builder_fee_rate):
+        """Return (builder_id, builder_fee_rate) for an order, or (None, None)."""
+        if builder is None:
+            if builder_fee_bps is not None or builder_fee_rate is not None:
+                raise ValueError("builder_fee_bps/builder_fee_rate require builder")
+            return None, None
+        rate = _fee_rate(builder_fee_bps, builder_fee_rate, "builder_fee")
+        return validate_builder_id(builder), rate
 
     # Public WS Subscriptions
     async def subscribe_tickers(self, asset):
@@ -385,7 +694,13 @@ class AevoClient:
         mmp=True,
         price_decimals=10**6,
         amount_decimals=10**6,
+        builder=None,
+        builder_fee_bps=None,
+        builder_fee_rate=None,
     ):
+        builder_id, builder_fee_rate = self._builder_attribution(
+            builder, builder_fee_bps, builder_fee_rate
+        )
         timestamp = int(time.time())
         salt, signature, order_id = self.sign_order(
             instrument_id=instrument_id,
@@ -394,6 +709,8 @@ class AevoClient:
             quantity=quantity,
             timestamp=timestamp,
             price_decimals=price_decimals,
+            builder_id=builder_id,
+            builder_fee_rate=builder_fee_rate,
         )
 
         payload = {
@@ -408,6 +725,9 @@ class AevoClient:
             "mmp": mmp,
             "timestamp": timestamp,
         }
+        if builder_id is not None:
+            payload["builder_id"] = builder_id
+            payload["builder_fee_rate"] = builder_fee_rate
         return payload, order_id
 
     def create_order_rest_json(
@@ -423,7 +743,13 @@ class AevoClient:
         amount_decimals=10**6,
         trigger=None,
         stop=None,
+        builder=None,
+        builder_fee_bps=None,
+        builder_fee_rate=None,
     ):
+        builder_id, builder_fee_rate = self._builder_attribution(
+            builder, builder_fee_bps, builder_fee_rate
+        )
         timestamp = int(time.time())
         salt, signature, order_id = self.sign_order(
             instrument_id=instrument_id,
@@ -432,6 +758,8 @@ class AevoClient:
             quantity=quantity,
             timestamp=timestamp,
             price_decimals=price_decimals,
+            builder_id=builder_id,
+            builder_fee_rate=builder_fee_rate,
         )
         payload = {
             "maker": self.wallet_address,
@@ -449,6 +777,9 @@ class AevoClient:
         if trigger and stop:
             payload["trigger"] = trigger
             payload["stop"] = stop
+        if builder_id is not None:
+            payload["builder_id"] = builder_id
+            payload["builder_fee_rate"] = builder_fee_rate
 
         return payload, order_id
 
@@ -461,6 +792,9 @@ class AevoClient:
         post_only=True,
         id=None,
         mmp=True,
+        builder=None,
+        builder_fee_bps=None,
+        builder_fee_rate=None,
     ):
         data, order_id = self.create_order_ws_json(
             instrument_id=int(instrument_id),
@@ -469,6 +803,9 @@ class AevoClient:
             quantity=quantity,
             post_only=post_only,
             mmp=mmp,
+            builder=builder,
+            builder_fee_bps=builder_fee_bps,
+            builder_fee_rate=builder_fee_rate,
         )
         payload = {"op": "create_order", "data": data}
         if id:
@@ -545,10 +882,12 @@ class AevoClient:
         timestamp,
         price_decimals=10**6,
         amount_decimals=10**6,
+        builder_id=None,
+        builder_fee_rate=None,
     ):
         salt = random.randint(0, 10**10)  # We just need a large enough number
 
-        order_struct = Order(
+        order_fields = dict(
             maker=self.wallet_address,  # The wallet"s main address
             isBuy=is_buy,
             limitPrice=int(round(limit_price * price_decimals, is_buy)),
@@ -557,6 +896,16 @@ class AevoClient:
             instrument=instrument_id,
             timestamp=timestamp,
         )
+        if builder_id is None:
+            order_struct = Order(**order_fields)
+        else:
+            # builder_fee_rate is the decimal rate string ("0.0003"); it is
+            # signed as the raw 6-decimal integer (300).
+            order_struct = BuilderOrder(
+                **order_fields,
+                builderId=builder_id,
+                builderFeeRate=rate_to_raw(builder_fee_rate),
+            )
         logger.info(self.signing_domain)
         domain = make_domain(**self.signing_domain)
         signable_bytes = keccak(order_struct.signable_bytes(domain=domain))
